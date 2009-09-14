@@ -65,7 +65,21 @@ module WillPaginate
         options = args.pop
         page, per_page, total_entries = wp_parse_options(options)
         finder = (options[:finder] || 'find').to_s
+        
+        if self.connection.adapter_name =~ /^mysql$/i
+        
+          # we may be in a model or an association proxy
+          klass = (@owner and @reflection) ? @reflection.klass : self
 
+          # In MySQL include a SQL_CALC_FOUND_ROWS option in the SELECT statement
+          if options[:select] and options[:select] !~ /SQL_CALC_FOUND_ROWS/i
+            options[:select] = "SQL_CALC_FOUND_ROWS " + options[:select]
+          else
+            options[:select] = "SQL_CALC_FOUND_ROWS #{klass.table_name}.*"
+          end
+          
+        end
+        
         if finder == 'find'
           # an array of IDs may have been given:
           total_entries ||= (Array === args.first and args.first.size)
@@ -187,6 +201,14 @@ module WillPaginate
       # Does the not-so-trivial job of finding out the total number of entries
       # in the database. It relies on the ActiveRecord +count+ method.
       def wp_count(options, args, finder)
+        
+        # For better speed use MySQL's FOUND_ROWS() method to calculate 
+        # total number of entries:
+        # http://dev.mysql.com/doc/refman/5.0/en/information-functions.html
+        if self.connection.adapter_name =~ /^mysql$/i
+          return self.connection.select_value("SELECT FOUND_ROWS()")
+        end
+        
         excludees = [:count, :order, :limit, :offset, :readonly]
         excludees << :from unless ActiveRecord::Calculations::CALCULATIONS_OPTIONS.include?(:from)
 
